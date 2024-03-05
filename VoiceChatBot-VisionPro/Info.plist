@@ -11,5 +11,9 @@
 		<key>UISceneConfigurations</key>
 		<dict/>
 	</dict>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>We use speech recognition to convert your voice into text for seamless interaction with our chatbot, enhancing your hands-free experience.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Your microphone is used to capture your voice input, which allows our chatbot to respond to your queries and commands accurately.</string>
 </dict>
 </plist>
