@@ -1,10 +1,3 @@
-//
-//  SpeechRecognitionManager.swift
-//  VoiceChatBot-VisionPro
-//
-//  Created by Siddanth Raja on 2/28/24.
-//
-
 import Foundation
 import Speech
 import AVFoundation
@@ -14,97 +7,115 @@ class SpeechRecognitionManager: ObservableObject {
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private let audioEngine = AVAudioEngine()
-    
+
     @Published var isRecording = false
     @Published var recognizedText = ""
 
     func startRecording() throws {
-        // Check if recognitionTask is running, if so, stop it
         if let recognitionTask = recognitionTask {
             recognitionTask.cancel()
             self.recognitionTask = nil
         }
-        
-        // Setup audio session for recording
+
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-        
-        // Initialize the recognitionRequest
-        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        
-        let inputNode = audioEngine.inputNode // Corrected this line
 
-        // Check if the recognitionRequest object is instantiated and is not nil
-        guard let recognitionRequest = recognitionRequest else { fatalError("Unable to create a SFSpeechAudioBufferRecognitionRequest object") }
-        
-        // Configure request so that results are returned before audio recording is finished
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+
+        guard let recognitionRequest = recognitionRequest else {
+            fatalError("Unable to create a SFSpeechAudioBufferRecognitionRequest object")
+        }
+
         recognitionRequest.shouldReportPartialResults = true
-        
-        // Start recognition
-        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { result, error in
-            
+
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, error in
             var isFinal = false
-            
+
             if let result = result {
-                // Update the recognizedText variable with the latest results
-                self.recognizedText = result.bestTranscription.formattedString
+                self?.recognizedText = result.bestTranscription.formattedString
                 isFinal = result.isFinal
             }
-            
-            // If error occurred or the result is final, stop the audioEngine (microphone) and recognition task
+
             if error != nil || isFinal {
-                self.audioEngine.stop()
+                self?.audioEngine.stop()
                 inputNode.removeTap(onBus: 0)
-                
-                self.recognitionRequest = nil
-                self.recognitionTask = nil
-                
-                self.isRecording = false
+
+                self?.recognitionRequest = nil
+                self?.recognitionTask = nil
+
+                DispatchQueue.main.async {
+                    self?.isRecording = false
+                }
             }
         }
-        
-        // Configure the microphone input
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { (buffer, when) in
-            self.recognitionRequest?.append(buffer)
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, when in
+            recognitionRequest.append(buffer)
         }
-        
-        // Prepare and start the audioEngine (microphone)
+
         audioEngine.prepare()
         try audioEngine.start()
-        
-        // Let the user know to start talking
-        recognizedText = "(Go ahead, I'm listening)"
+
         isRecording = true
+        recognizedText = "(Go ahead, I'm listening)"
     }
-    
+
     func stopRecording() {
         audioEngine.stop()
         recognitionRequest?.endAudio()
         isRecording = false
     }
-    
-    func checkPermissions() {
+
+    func checkPermissions(completion: @escaping (Bool) -> Void) {
         SFSpeechRecognizer.requestAuthorization { authStatus in
-            // Handle the authorization status
-            OperationQueue.main.addOperation {
-                switch authStatus {
-                case .authorized:
-                    break // Good to go, you can start recording
-                case .denied:
-                    // User denied access. Explain that you need audio access for the feature.
-                    break
-                case .restricted:
-                    // Speech recognition restricted on this device
-                    break
-                case .notDetermined:
-                    // Speech recognition not yet authorized
-                    break
-                @unknown default:
-                    break // Handle future enum cases
+            DispatchQueue.main.async {
+                completion(authStatus == .authorized)
+            }
+        }
+    }
+
+    func summarizeText(_ text: String) {
+        guard let url = URL(string: "https://api.openai.com/v1/completions") else { return }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(Private.openAIKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpMethod = "POST"
+
+        let prompt = "Summarize this: \(text)"
+        let body: [String: Any] = [
+            "model": "text-davinci-002",
+            "prompt": prompt,
+            "temperature": 0.5,
+            "max_tokens": 200
+        ]
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [])
+
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let data = data, error == nil else {
+                print("Error during the API request: \(error?.localizedDescription ?? "Unknown error")")
+                return
+            }
+            if let summary = self?.parseSummary(from: data) {
+                DispatchQueue.main.async {
+                    self?.recognizedText = summary
                 }
             }
         }
+        task.resume()
+    }
+
+    private func parseSummary(from data: Data) -> String? {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let choices = json["choices"] as? [[String: Any]],
+           let firstChoice = choices.first,
+           let summary = firstChoice["text"] as? String {
+            return summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
     }
 }

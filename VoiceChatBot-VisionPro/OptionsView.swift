@@ -8,11 +8,29 @@
 import SwiftUI
 
 struct OptionsView: View {
+    @Binding var transcribedText: String  // Bind to the transcribed text
+    var speechRecognizer: SpeechRecognitionManager
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        NavigationView {
+            List {
+                Section(header: Text("Transcribed Text")) {
+                    Text(transcribedText).padding()
+                }
+
+                Section(header: Text("Options")) {
+                    Button("Summarize") {
+                        speechRecognizer.summarizeText(speechRecognizer.recognizedText)
+                    }
+
+
+                    Button("Translate") {
+                        // Implement translation feature
+                    }
+                }
+            }
+            .navigationTitle("Text Options")
+        }
     }
 }
 
-#Preview {
-    OptionsView()
-}
+
